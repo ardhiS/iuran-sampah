@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
-// URL Google Sheets yang dipublikasikan sebagai CSV
-// Ganti dengan URL Google Sheets Anda
+// URL Google Sheets langsung via share link (Anyone with link - Viewer)
 const GOOGLE_SHEETS_CSV_URL =
-  'https://docs.google.com/spreadsheets/d/e/2PACX-1vT03sZNnKiWPvrih-7YJbrh6Th_azWmTzYKpbZ6_IuymxCWHGv7Fa_7zhgzV3ANjQ/pub?gid=1098928608&single=true&output=csv';
+  'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4YSpY_cqT9uGI4v2mUmEq3ssRA4bYepopPW83eawf8zoFJtexa3iAc_vTCtNjiLjbqYFtjOnjCUxG/pub?gid=1098928608&single=true&output=csv';
 
 // Nama bulan
 const MONTHS = [
@@ -375,11 +374,11 @@ function App() {
             namaLower.includes('total uang masuk') ||
             namaLower.includes('total pemasukan')
           ) {
-            // Get value from Februari column or any column with value
+            // Cari nilai numerik dari kolom bulan (bukan kolom No/Nama)
             const value =
-              row['Februari'] ||
-              Object.values(row).find((v) => v && String(v).match(/[\d,]+/)) ||
-              '';
+              MONTHS.map((m) => row[m]).find(
+                (v) => v && String(v).replace(/[^0-9]/g, '').length > 0,
+              ) || '';
             totalUangMasuk =
               parseInt(String(value).replace(/[^0-9]/g, '')) || 0;
             console.log('Found Total Uang Masuk:', totalUangMasuk);
@@ -390,10 +389,11 @@ function App() {
             namaLower.includes('uang keluar') ||
             namaLower.includes('pengeluaran')
           ) {
+            // Cari nilai numerik dari kolom bulan (bukan kolom No/Nama)
             const value =
-              row['Februari'] ||
-              Object.values(row).find((v) => v && String(v).match(/[\d,]+/)) ||
-              '';
+              MONTHS.map((m) => row[m]).find(
+                (v) => v && String(v).replace(/[^0-9]/g, '').length > 0,
+              ) || '';
             totalUangKeluar =
               parseInt(String(value).replace(/[^0-9]/g, '')) || 0;
             console.log('Found Total Uang Keluar:', totalUangKeluar);
@@ -402,9 +402,9 @@ function App() {
 
           if (namaLower.includes('sisa saldo') || namaLower === 'saldo') {
             const value =
-              row['Februari'] ||
-              Object.values(row).find((v) => v !== undefined && v !== '') ||
-              '';
+              MONTHS.map((m) => row[m]).find(
+                (v) => v && String(v).replace(/[^0-9]/g, '').length > 0,
+              ) || '';
             sisaSaldo = parseInt(String(value).replace(/[^0-9]/g, '')) || 0;
             console.log('Found Sisa Saldo:', sisaSaldo);
             return;
@@ -468,13 +468,11 @@ function App() {
           0,
         );
 
-        // Use values from spreadsheet if available, otherwise use calculated
-        const finalTotalPemasukan = totalUangMasuk || calculatedPemasukan;
-        const finalTotalPengeluaran = totalUangKeluar;
-        const finalSisaSaldo =
-          sisaSaldo !== undefined
-            ? sisaSaldo
-            : finalTotalPemasukan - finalTotalPengeluaran;
+        // Selalu gunakan nilai yang dihitung dari data warga (lebih akurat)
+        const finalTotalPemasukan = calculatedPemasukan;
+        // Pengeluaran = Pemasukan karena semua uang langsung dikeluarkan
+        const finalTotalPengeluaran = calculatedPemasukan;
+        const finalSisaSaldo = 0;
 
         console.log('Final Summary:', {
           finalTotalPemasukan,
@@ -505,17 +503,27 @@ function App() {
     resident.nama.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
-  // Hitung statistik
+  // Hitung statistik — hanya bulan yang sudah berjalan (Jan s/d bulan saat ini)
   const calculateStats = () => {
+    const currentMonthIndex = new Date().getMonth(); // 0-based: Januari=0, Mei=4
+    const activeMonths = MONTHS.slice(0, currentMonthIndex + 1);
+
     let totalLunas = 0;
     let totalBelumLunas = 0;
     let totalPemasukan = 0;
 
     residents.forEach((resident) => {
+      // Total pemasukan: hitung SEMUA bulan yang ada pembayarannya (termasuk bulan depan jika sudah bayar)
       MONTHS.forEach((month) => {
         if (resident.payments[month] > 0) {
-          totalLunas++;
           totalPemasukan += resident.payments[month];
+        }
+      });
+
+      // Lunas/belum lunas: hanya hitung bulan yang sudah berjalan
+      activeMonths.forEach((month) => {
+        if (resident.payments[month] > 0) {
+          totalLunas++;
         } else {
           totalBelumLunas++;
         }
@@ -526,7 +534,13 @@ function App() {
     const persentaseLunas =
       totalTransaksi > 0 ? (totalLunas / totalTransaksi) * 100 : 0;
 
-    return { totalPemasukan, totalLunas, totalBelumLunas, persentaseLunas };
+    return {
+      totalPemasukan,
+      totalLunas,
+      totalBelumLunas,
+      persentaseLunas,
+      activeMonths,
+    };
   };
 
   const stats = calculateStats();
@@ -577,7 +591,13 @@ function App() {
             >
               <div className='stat-icon'>✅</div>
               <div className='stat-info'>
-                <span className='stat-label'>Pembayaran Lunas</span>
+                <span className='stat-label'>
+                  Sudah Bayar (Jan–
+                  {stats.activeMonths?.[
+                    stats.activeMonths.length - 1
+                  ]?.substring(0, 3) ?? 'Mei'}
+                  )
+                </span>
                 <span className='stat-value'>
                   {stats.totalLunas} <small>transaksi</small>
                 </span>
@@ -590,7 +610,13 @@ function App() {
             >
               <div className='stat-icon'>⏳</div>
               <div className='stat-info'>
-                <span className='stat-label'>Belum Lunas</span>
+                <span className='stat-label'>
+                  Belum Bayar (Jan–
+                  {stats.activeMonths?.[
+                    stats.activeMonths.length - 1
+                  ]?.substring(0, 3) ?? 'Mei'}
+                  )
+                </span>
                 <span className='stat-value'>
                   {stats.totalBelumLunas} <small>transaksi</small>
                 </span>
